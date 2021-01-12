@@ -663,11 +663,11 @@ class ZipFile implements ZipFileInterface
      *
      * @return ZipEntry
      */
-    public function addSplFile(\SplFileInfo $file, $entryName = null, array $options = [])
+    public function addSplFile(\SplFileInfo $file, $entryName = null, array $options = [], $skipContents = false)
     {
-        if ($file instanceof \DirectoryIterator) {
-            throw new InvalidArgumentException('File should not be \DirectoryIterator.');
-        }
+//        if ($file instanceof \DirectoryIterator) {
+//            throw new InvalidArgumentException('File should not be \DirectoryIterator.');
+//        }
         $defaultOptions = [
             ZipOptions::COMPRESSION_METHOD => null,
             ZipOptions::MODIFIED_TIME => null,
@@ -675,7 +675,7 @@ class ZipFile implements ZipFileInterface
         /** @noinspection AdditionOperationOnArraysInspection */
         $options += $defaultOptions;
 
-        if (!$file->isReadable()) {
+        if (!$file->isReadable() && !$skipContents) {
             throw new InvalidArgumentException(sprintf('File %s is not readable', $file->getPathname()));
         }
 
@@ -695,7 +695,11 @@ class ZipFile implements ZipFileInterface
         $zipEntry->setExtractedOS(ZipPlatform::OS_UNIX);
 
         $zipData = null;
-        $filePerms = $file->getPerms();
+        try {
+            $filePerms = $file->getPerms();
+        } catch (\Exception $exception) {
+            $filePerms = 0;
+        }
 
         if ($file->isLink()) {
             $linkTarget = $file->getLinkTarget();
@@ -722,12 +726,24 @@ class ZipFile implements ZipFileInterface
 
             $zipEntry->setCompressionMethod($compressionMethod);
 
-            $zipData = new ZipFileData($zipEntry, $file);
+            if (!$skipContents) {
+                $zipData = new ZipFileData($zipEntry, $file);
+            } else {
+                $zipData = new ZipNewData($zipEntry, "");
+                $zipEntry->setUncompressedSize($file->getSize());
+            }
         } elseif ($file->isDir()) {
             $zipEntry->setCompressionMethod(ZipCompressionMethod::STORED);
             $zipEntry->setUncompressedSize(0);
             $zipEntry->setCompressedSize(0);
             $zipEntry->setCrc(0);
+        } else {
+            // it could be socket
+            $zipEntry->setCompressionMethod(ZipCompressionMethod::STORED);
+            $zipEntry->setUncompressedSize(0);
+            $zipEntry->setCompressedSize(0);
+            $zipEntry->setCrc(0);
+            $zipData = new ZipNewData($zipEntry, "");
         }
 
         $zipEntry->setUnixMode($filePerms);
@@ -751,7 +767,11 @@ class ZipFile implements ZipFileInterface
         }
 
         if ($timestamp === null) {
-            $timestamp = $file->getMTime();
+            try {
+                $timestamp = $file->getMTime();
+            } catch (\Exception $exception) {
+                $timestamp = 0;
+            }
         }
 
         $zipEntry->setTime($timestamp);
